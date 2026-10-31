@@ -29,3 +29,11 @@ go.work.sum
 
 chatlog.exe# Added by goreleaser init:
 dist/
+
+# Local WeChat exports
+/bin/
+/chatlog-export/
+/chatlog-session.json
+
+# Python script caches
+__pycache__/

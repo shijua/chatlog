@@ -2,6 +2,8 @@ module github.com/CharlexH/chatlog
 
 go 1.24.0
 
+replace github.com/sjzar/chatlog => ./
+
 require (
 	github.com/Eyevinn/mp4ff v0.49.0
 	github.com/cespare/xxhash v1.1.0
@@ -18,6 +20,7 @@ require (
 	github.com/rs/zerolog v1.34.0
 	github.com/shirou/gopsutil/v4 v4.25.7
 	github.com/sirupsen/logrus v1.9.3
+	github.com/sjzar/chatlog v0.0.0
 	github.com/sjzar/go-lame v0.0.9
 	github.com/sjzar/go-silk v0.0.1
 	github.com/spf13/cobra v1.9.1
