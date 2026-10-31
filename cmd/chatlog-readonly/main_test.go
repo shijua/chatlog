@@ -30,7 +30,8 @@ func TestRejectedRequestsNeverReachBackend(t *testing.T) {
 		{"GET", "/sse", ""},
 		{"GET", "/message", ""},
 		{"GET", "/data/example", ""},
-		{"GET", "/api/v1/contact", ""},
+		{"GET", "/api/v1/search", ""},
+		{"GET", "/api/v1/diary", ""},
 		{"GET", "/api/v1/session/../chatlog", ""},
 		{"GET", "/api/v1/%73ession", ""},
 		{"GET", "/api/v1/session?method=POST", ""},
@@ -52,7 +53,7 @@ func TestRejectedRequestsNeverReachBackend(t *testing.T) {
 }
 
 func TestAllowedRequestsAreRebuiltAsReads(t *testing.T) {
-	for _, path := range []string{"/api/v1/session", "/api/v1/chatlog"} {
+	for path := range allowedQueries {
 		t.Run(path, func(t *testing.T) {
 			calls := 0
 			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -134,5 +135,23 @@ func TestPeerOnlyAllowsActualSource(t *testing.T) {
 				t.Fatal("unauthorized source reached backend")
 			}
 		})
+	}
+}
+
+func TestAllAllowedRoutesRejectWriteMethods(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("write method reached backend")
+		return nil, nil
+	})}
+	for path := range allowedQueries {
+		for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
+			t.Run(method+" "+path, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				readOnlyHandler(client).ServeHTTP(w, httptest.NewRequest(method, path, nil))
+				if w.Code != http.StatusMethodNotAllowed {
+					t.Fatalf("unexpected status: %d", w.Code)
+				}
+			})
+		}
 	}
 }

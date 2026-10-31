@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Incrementally export local chatlog API messages without changing the server."""
+"""Sync every local WeChat message table; optionally retain legacy API export mode."""
 import argparse
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -214,6 +214,8 @@ def sync(args, api=None, run_at=None):
     dest = args.output.resolve()
     dest.mkdir(mode=0o700, parents=True, exist_ok=True)
     index_path = dest / "index.json"
+    if index_path.exists() and json.loads(index_path.read_text()).get("source_type") == "sqlite_tables":
+        index_path = dest / "api-index.json"
     index = json.loads(index_path.read_text()) if index_path.exists() else {
         "started_at": datetime.now(timezone.utc).isoformat(), "sessions": []}
     # Freeze the upper boundary before any API reads. Each successful session advances
@@ -294,9 +296,11 @@ def sync(args, api=None, run_at=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=REPO / "chatlog-export")
+    parser.add_argument("--source", choices=("database", "api"), default="database")
+    parser.add_argument("--work-dir", type=Path, help="decrypted macOS WeChat 3.x database directory")
     parser.add_argument("--overlap-hours", type=float, default=24)
     parser.add_argument("--page-size", type=int, default=10000)
-    parser.add_argument("--full", action="store_true", help="reconcile all API-readable history, preserving existing records")
+    parser.add_argument("--full", action="store_true", help="force all database snapshots (or all history in API mode)")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
     if not 1 <= args.page_size <= 10000 or not 0 < args.overlap_hours <= 876000:
@@ -308,12 +312,16 @@ def main():
         except BlockingIOError:
             parser.exit(1, "Another export is already running.\n")
         try:
-            summary = sync(args)
+            if args.source == "database":
+                from chatlog_sqlite import sync_tables
+                summary = sync_tables(args)
+            else:
+                summary = sync(args)
         except Exception as error:
             print("Export failed: " + type(error).__name__, file=sys.stderr)
             return 1
     print(json.dumps(summary, ensure_ascii=False), flush=True)
-    return 1 if summary["failed_sessions"] else 0
+    return 1 if summary.get("failed_sessions", 0) or summary.get("failed_tables", 0) or summary.get("database_failures", 0) else 0
 
 
 if __name__ == "__main__":

@@ -165,6 +165,15 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(result["failed_sessions"], 1)
         self.assertFalse((self.dest / self.filename).exists())
 
+    def test_api_mode_preserves_database_index(self):
+        database_index = {"source_type": "sqlite_tables", "tables": [], "total_messages": 42}
+        export.atomic_json(self.dest / "api-index.json", self.index)
+        export.atomic_json(self.dest / "index.json", database_index)
+        summary = export.sync(self.args, self.fake_api(), self.run_at)
+        self.assertEqual(summary["successful_sessions"], 1)
+        self.assertEqual(json.loads((self.dest / "index.json").read_text()), database_index)
+        self.assertEqual(json.loads((self.dest / "api-index.json").read_text())["total_messages"], 2)
+
     def test_original_export_uses_start_time_not_completion(self):
         self.index["sessions"][0].pop("last_success_at")
         self.index["completed_at"] = "2026-10-31T11:00:00+00:00"

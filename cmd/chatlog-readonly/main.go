@@ -14,8 +14,10 @@ import (
 const upstream = "http://127.0.0.1:5030"
 
 var allowedQueries = map[string]map[string]bool{
-	"/api/v1/session": {"keyword": true, "limit": true, "offset": true, "format": true},
-	"/api/v1/chatlog": {"talker": true, "time": true, "sender": true, "keyword": true, "limit": true, "offset": true, "format": true},
+	"/api/v1/session":  {"keyword": true, "limit": true, "offset": true, "format": true},
+	"/api/v1/chatlog":  {"talker": true, "time": true, "sender": true, "keyword": true, "limit": true, "offset": true, "format": true},
+	"/api/v1/contact":  {"keyword": true, "limit": true, "offset": true, "format": true},
+	"/api/v1/chatroom": {"keyword": true, "limit": true, "offset": true, "format": true},
 }
 
 func readOnlyHandler(client *http.Client) http.Handler {
