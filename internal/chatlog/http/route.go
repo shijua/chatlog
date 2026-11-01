@@ -56,6 +56,7 @@ func (s *Service) initAPIRouter() {
 	api := s.router.Group("/api/v1", s.checkDBStateMiddleware())
 	{
 		api.GET("/chatlog", s.handleChatlog)
+		api.GET("/timeline", s.handleTimeline)
 		api.GET("/contact", s.handleContacts)
 		api.GET("/chatroom", s.handleChatRooms)
 		api.GET("/session", s.handleSessions)

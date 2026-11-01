@@ -131,6 +131,41 @@ def checkpoint(dest, index):
     atomic_json(dest / "index.json", index)
 
 
+def flatten_exports(dest, index):
+    entries = index.get("tables", []) + index.get("missing_tables", [])
+    nested = dest / "tables"
+    if nested.is_symlink():
+        raise ValueError("symlink export directories are not supported")
+    moves = []
+    for entry in entries:
+        relative = Path(entry["file"])
+        if len(relative.parts) == 1:
+            continue
+        if len(relative.parts) != 2 or relative.parts[0] != "tables":
+            raise ValueError("invalid nested export path")
+        source = dest / relative
+        target = dest / relative.name
+        if source.is_symlink() or target.is_symlink():
+            raise ValueError("symlink exports are not supported")
+        if source.exists() and target.exists():
+            raise ValueError("flat export destination already exists")
+        if not source.exists() and target.exists():
+            # A prior process may have moved the file before saving the index.
+            with target.open("rb") as f:
+                digest = hashlib.file_digest(f, "sha256").hexdigest()
+            if digest != entry.get("sha256"):
+                raise ValueError("interrupted migration destination checksum mismatch")
+        moves.append((entry, source, target))
+    for entry, source, target in moves:
+        if source.exists():
+            source.rename(target)
+        entry["file"] = target.name
+    if moves:
+        atomic_json(dest / "index.json", index)
+    if nested.is_dir() and not any(nested.iterdir()):
+        nested.rmdir()
+
+
 def sync_tables(args, run_at=None):
     dest = args.output.resolve()
     config_path = Path.home() / ".chatlog/chatlog-server.json"
@@ -147,8 +182,6 @@ def sync_tables(args, run_at=None):
     if not paths:
         raise ValueError("no decrypted message databases found")
     dest.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = dest / "tables"
-    target.mkdir(mode=0o700, exist_ok=True)
     index_path = dest / "index.json"
     previous = json.loads(index_path.read_text()) if index_path.exists() else {}
     if previous and previous.get("source_type") != "sqlite_tables":
@@ -159,8 +192,16 @@ def sync_tables(args, run_at=None):
         previous = {}
     if previous and previous.get("work_dir") != str(root):
         raise ValueError("work directory changed; choose a separate output directory")
+    if previous:
+        flatten_exports(dest, previous)
     old = {e["id"]: e for e in previous.get("missing_tables", []) + previous.get("tables", [])}
     users, warnings = identities(root)
+    # Keep resolved identities even after optional legacy exports are removed.
+    for entry in old.values():
+        user = entry.get("talker")
+        if user:
+            users.setdefault(hashlib.md5(user.encode()).hexdigest(), {
+                "talker": user, "nickname": entry.get("nickname", ""), "remark": entry.get("remark", "")})
     # Also use previously exported identifiers; identity lookup never reads message content.
     for listing in (dest.parent / "chatlog-session.json", dest / "api-index.json"):
         if not listing.exists():
@@ -190,7 +231,7 @@ def sync_tables(args, run_at=None):
                     table_hash = TABLE.fullmatch(table).group(1).lower()
                     identity = relative + ":" + table
                     seen.add(identity)
-                    filename = "tables/" + hashlib.sha256(relative.encode()).hexdigest()[:16] + "_" + table_hash + ".json"
+                    filename = hashlib.sha256(relative.encode()).hexdigest()[:16] + "_" + table_hash + ".json"
                     entry = dict(old.get(identity, {}))
                     entry.update(id=identity, database=relative, table=table, table_hash=table_hash, file=filename,
                                  talker=None, nickname="", remark="", kind="unresolved")

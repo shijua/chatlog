@@ -16,9 +16,13 @@ python3 scripts/chatlog_export.py --work-dir /absolute/path/to/decrypted/databas
 
 ## Files and migration
 
+Message files are stored directly in `chatlog-export/`, alongside `index.json`. Older `tables/` layouts are automatically moved into the export root without copying message data. The index paths are updated, and the empty subdirectory is removed. Conflicting destination files are never overwritten. Interrupted moves resume after verifying already-moved file checksums.
+
 - `chatlog-export/index.json`: schema version 2; contains `tables`, `table_count`, `total_messages`, `failures`, `database_failures`, `unresolved_tables`, `missing_tables`, and `last_run`.
-- `chatlog-export/tables/*.json`: one JSON array per database/table pair. Same-named tables in different database shards get separate files. Rows contain **original SQLite fields**, including `mesLocalID`, `mesSvrID`, `msgCreateTime`, and `msgContent`. This is a different format from the API's normalized messages. BLOBs are losslessly encoded as `{"$sqlite_blob":"<base64>"}`. Media files are not downloaded.
+- `chatlog-export/*.json` (excluding indexes): one JSON array per database/table pair. Same-named tables in different database shards get separate files. Rows contain **original SQLite fields**, including `mesLocalID`, `mesSvrID`, `msgCreateTime`, and `msgContent`. This is a different format from the API's normalized messages. BLOBs are losslessly encoded as `{"$sqlite_blob":"<base64>"}`. Media files are not downloaded.
 - An existing session-based API index is copied to `chatlog-export/api-index.json` before the main index is migrated. Existing API message files and `chatlog-session.json` are retained. They are compatibility exports, not the all-table synchronization output, and their counts must not be added to the raw-table counts.
+
+After verifying migration, the old API message files, `api-index.json`, and `chatlog-session.json` can be removed. Keep the raw-table JSON files in the export root and the main `index.json`; resolved identities are retained in that index and reused on later runs. Default database synchronization does not recreate the removed legacy exports.
 
 The first database run writes all tables. Subsequent runs inspect the schema and database/WAL/journal file metadata (inode, size, and modification/change times). If the source signature and exported file size have not changed, the table is skipped. A changed database is read in a SQLite read transaction and its tables are regenerated as atomic snapshots. This catches newly imported old-timestamp messages, edits, and deletions without depending on API time windows or non-unique message IDs. It is incremental **at database-file granularity**, not a row-level change feed. A large changed database can take longer. Source changes during a snapshot invalidate its cached signature so the next run rereads it. For recovery or manual verification, force all snapshots:
 

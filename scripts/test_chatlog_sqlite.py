@@ -70,6 +70,61 @@ class DatabaseSyncTests(unittest.TestCase):
         self.assertEqual(self.rows(unknown)[0]["msgContent"], "hidden too")
         self.assertEqual(unknown["kind"], "unresolved")
 
+    def test_resolved_identity_survives_legacy_cleanup(self):
+        listing = self.dest.parent / "chatlog-session.json"
+        export.atomic_json(listing, {"items": [{"userName": self.other, "nickName": "Previously known"}]})
+        summary, _ = self.run_sync()
+        self.assertEqual(summary["unresolved_tables"], 0)
+        listing.unlink()
+        summary, index = self.run_sync()
+        self.assertEqual(summary["unresolved_tables"], 0)
+        retained = next(e for e in index["tables"] if e["talker"] == self.other)
+        self.assertEqual(retained["nickname"], "Previously known")
+        self.assertFalse(listing.exists())
+        self.assertFalse((self.dest / "api-index.json").exists())
+
+    def nest_exports(self):
+        _, index = self.run_sync()
+        nested = self.dest / "tables"
+        nested.mkdir()
+        for entry in index["tables"]:
+            source = self.dest / entry["file"]
+            source.rename(nested / source.name)
+            entry["file"] = "tables/" + source.name
+        export.atomic_json(self.dest / "index.json", index)
+        return index
+
+    def test_flat_layout_and_nested_migration_skip_reread(self):
+        previous = self.nest_exports()
+        with patch.object(local, "snapshot", side_effect=AssertionError("unnecessary reread")):
+            summary, index = self.run_sync()
+        self.assertEqual(summary["skipped_tables"], 2)
+        self.assertFalse((self.dest / "tables").exists())
+        for old, new in zip(previous["tables"], index["tables"]):
+            self.assertEqual(new["file"], Path(old["file"]).name)
+            self.assertEqual(new["sha256"], old["sha256"])
+            self.assertTrue((self.dest / new["file"]).exists())
+
+    def test_interrupted_flattening_recovers_from_verified_destination(self):
+        index = self.nest_exports()
+        entry = index["tables"][0]
+        source = self.dest / entry["file"]
+        source.rename(self.dest / source.name)
+        summary, _ = self.run_sync()
+        self.assertEqual(summary["skipped_tables"], 2)
+        self.assertFalse((self.dest / "tables").exists())
+
+    def test_flatten_collision_never_overwrites_files(self):
+        index = self.nest_exports()
+        entry = index["tables"][0]
+        target = self.dest / Path(entry["file"]).name
+        target.write_text("unrelated file")
+        with self.assertRaisesRegex(ValueError, "already exists"):
+            self.run_sync()
+        self.assertEqual(target.read_text(), "unrelated file")
+        self.assertTrue((self.dest / entry["file"]).exists())
+        self.assertEqual(json.loads((self.dest / "index.json").read_text()), index)
+
     def test_no_change_skips_all_snapshots(self):
         self.run_sync()
         with patch.object(local, "snapshot", side_effect=AssertionError("unexpected reread")):

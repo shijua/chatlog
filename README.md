@@ -194,6 +194,8 @@ GET /api/v1/chatlog?time=2023-01-01&talker=wxid_xxx
 
 ### 其他 API 接口
 
+- **全账号时间线（macOS 微信 3.x）**：`GET /api/v1/timeline?start=2026-10-31&end=2026-11-02`，不需要 `talker`，按北京时间查询 `[start, end)` 内全部消息表，支持游标分页。详见 [时间线 API](docs/timeline-api.md)。
+
 - **联系人列表**：`GET /api/v1/contact`
 - **群聊列表**：`GET /api/v1/chatroom`
 - **会话列表**：`GET /api/v1/session`
