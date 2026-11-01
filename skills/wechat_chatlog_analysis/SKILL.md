@@ -14,15 +14,23 @@
 
 ## Build one unified index
 
-- Take private chats from local export files and group chats from an API export or an older export that carries per message sender ids.
+- Prefer the whole account timeline endpoint when it exists, because it returns every message table in chronological order in one sweep, with no talker parameter and no session list in between.
+
+- Query it by a fixed time window with an exclusive end, in Beijing time, and page with its cursor until there is no next page, keeping the same start and end for every page.
+
+- Use the pair of source plus local message id as the deduplication key, never a content hash alone, so same second duplicates across tables are kept and edited messages are not double counted.
+
+- Treat hidden chats, unmapped tables and same named tables in different databases as in scope by default, because the timeline endpoint enumerates message tables directly instead of going through sessions.
+
+- Fall back to private chats from local export files and group chats from an API export that carries per message sender ids only when the timeline endpoint is unavailable.
 
 - Do not use a local group file for sender attribution when it carries no per message sender names.
 
-- Keep only time, talker, sender account id, message type, content hash and text content in the index.
+- Keep only time, talker, sender account id, message type, content hash and text content in the index, plus source, local message id and identity resolved flag when the timeline endpoint supplies them.
 
-- Deduplicate forwards, copy paste and sticker floods by content hash plus time proximity before counting them as separate events.
+- Deduplicate forwards, copy paste and sticker floods by content hash plus time proximity before counting them as separate events, after the source plus local id deduplication above.
 
-- Record the baseline index and its hash so a later incremental run can diff against it instead of rescanning everything.
+- Record the baseline index and its hash so a later incremental run can diff against it instead of rescanning everything, and for timeline pagination fix the window end and overlap the previous window, because a live import during paging can otherwise move a message before the cursor.
 
 ## Find bursts first, then events
 
