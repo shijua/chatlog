@@ -155,3 +155,17 @@ func TestAllAllowedRoutesRejectWriteMethods(t *testing.T) {
 		}
 	}
 }
+
+func TestTimelineExclusionsForwardedAsGET(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != "GET" || r.URL.Query().Get("exclude_talker") != "wxid_a,group@chatroom" || r.URL.Query().Get("exclude_sender") != "wxid_b" {
+			t.Fatal("exclusions not forwarded correctly")
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+	})}
+	w := httptest.NewRecorder()
+	readOnlyHandler(client).ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/timeline?start=2026-11-01&end=2026-11-02&exclude_talker=wxid_a,group@chatroom&exclude_sender=wxid_b", nil))
+	if w.Code != 200 {
+		t.Fatalf("status %d", w.Code)
+	}
+}

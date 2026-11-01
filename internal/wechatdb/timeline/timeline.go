@@ -6,6 +6,7 @@ import (
 	"container/heap"
 	"context"
 	"crypto/md5"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -33,10 +34,12 @@ const DefaultLimit = 500
 const MaxLimit = 5000
 
 type Options struct {
-	Start  time.Time
-	End    time.Time
-	Limit  int
-	Cursor string
+	Start          time.Time
+	End            time.Time
+	Limit          int
+	Cursor         string
+	ExcludeTalkers []string
+	ExcludeSenders []string
 }
 
 type Item struct {
@@ -57,6 +60,7 @@ type Page struct {
 	HasMore          bool      `json:"has_more"`
 	NextCursor       string    `json:"next_cursor"`
 	TablesScanned    int       `json:"tables_scanned"`
+	TablesExcluded   int       `json:"tables_excluded"`
 	UnresolvedItems  int       `json:"unresolved_items"`
 	IdentityWarnings int       `json:"identity_warnings"`
 }
@@ -68,6 +72,47 @@ type cursor struct {
 	Time    int64  `json:"time"`
 	Source  string `json:"source"`
 	ID      int64  `json:"id"`
+	Filters string `json:"filters,omitempty"`
+}
+
+func normalizeOptions(opt Options) (Options, error) {
+	normalize := func(ids []string) ([]string, error) {
+		seen := make(map[string]bool)
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if len(id) > 256 || strings.ContainsAny(id, ",\x00\r\n") {
+				return nil, errors.New("invalid excluded ID")
+			}
+			seen[id] = true
+		}
+		if len(seen) > 100 {
+			return nil, errors.New("at most 100 excluded IDs per filter")
+		}
+		var result []string
+		for id := range seen {
+			result = append(result, id)
+		}
+		sort.Strings(result)
+		return result, nil
+	}
+	var err error
+	opt.ExcludeTalkers, err = normalize(opt.ExcludeTalkers)
+	if err != nil {
+		return opt, err
+	}
+	opt.ExcludeSenders, err = normalize(opt.ExcludeSenders)
+	return opt, err
+}
+
+func filterDigest(opt Options) string {
+	if len(opt.ExcludeTalkers) == 0 && len(opt.ExcludeSenders) == 0 {
+		return ""
+	}
+	data, _ := json.Marshal([][]string{opt.ExcludeTalkers, opt.ExcludeSenders})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 
 // ParseRange treats unzoned dates and timestamps as Beijing time. End is exclusive.
@@ -110,20 +155,25 @@ func decodeCursor(opt Options) (*cursor, error) {
 		return nil, errors.New("invalid cursor")
 	}
 	var c cursor
-	if err := json.Unmarshal(data, &c); err != nil || c.Version != 1 || c.Start != opt.Start.Unix() || c.End != opt.End.Unix() || c.Time < c.Start || c.Time >= c.End || c.Source == "" || c.ID < 0 {
+	if err := json.Unmarshal(data, &c); err != nil || c.Version != 1 || c.Start != opt.Start.Unix() || c.End != opt.End.Unix() || c.Time < c.Start || c.Time >= c.End || c.Source == "" || c.ID < 0 || c.Filters != filterDigest(opt) {
 		return nil, errors.New("invalid cursor or cursor time range mismatch")
 	}
 	return &c, nil
 }
 
 func Validate(opt Options) error {
+	var err error
+	opt, err = normalizeOptions(opt)
+	if err != nil {
+		return err
+	}
 	if !opt.Start.Before(opt.End) || opt.Start.Nanosecond() != 0 || opt.End.Nanosecond() != 0 {
 		return errors.New("invalid time interval")
 	}
 	if opt.Limit < 1 || opt.Limit > MaxLimit {
 		return errors.New("limit must be between 1 and 5000")
 	}
-	_, err := decodeCursor(opt)
+	_, err = decodeCursor(opt)
 	return err
 }
 
@@ -275,6 +325,11 @@ func loadIdentities(ctx context.Context, paths []string) (map[string]identity, i
 // Query returns a bounded global page. Every source failure fails the request;
 // unavailable tables are never silently mistaken for an empty conversation.
 func Query(ctx context.Context, root string, opt Options) (*Page, error) {
+	var err error
+	opt, err = normalizeOptions(opt)
+	if err != nil {
+		return nil, err
+	}
 	if err := Validate(opt); err != nil {
 		return nil, err
 	}
@@ -314,7 +369,7 @@ func Query(ctx context.Context, root string, opt Options) (*Page, error) {
 	}
 	if page.HasMore {
 		last := page.Items[len(page.Items)-1]
-		data, _ := json.Marshal(cursor{1, opt.Start.Unix(), opt.End.Unix(), last.Time.Unix(), last.Source, last.LocalID})
+		data, _ := json.Marshal(cursor{Version: 1, Start: opt.Start.Unix(), End: opt.End.Unix(), Time: last.Time.Unix(), Source: last.Source, ID: last.LocalID, Filters: filterDigest(opt)})
 		page.NextCursor = base64.RawURLEncoding.EncodeToString(data)
 	}
 	return page, nil
@@ -350,10 +405,22 @@ func scanDatabase(ctx context.Context, db *sql.DB, root, path string, opt Option
 	if err != nil {
 		return err
 	}
+	excludedTables := make(map[string]bool)
+	for _, user := range opt.ExcludeTalkers {
+		excludedTables[fmt.Sprintf("%x", md5.Sum([]byte(user)))] = true
+	}
+	excludedSenders := make(map[string]bool)
+	for _, user := range opt.ExcludeSenders {
+		excludedSenders[user] = true
+	}
 	for _, table := range tables {
-		page.TablesScanned++
 		source := filepath.ToSlash(relative) + ":" + table
 		tableHash := strings.ToLower(messageTable.FindStringSubmatch(table)[1])
+		if excludedTables[tableHash] {
+			page.TablesExcluded++
+			continue
+		}
+		page.TablesScanned++
 		query := "SELECT mesLocalID,COALESCE(mesSvrID,0),msgCreateTime,COALESCE(msgContent,''),COALESCE(messageType,0),COALESCE(mesDes,0) FROM " + quote(table) + " WHERE msgCreateTime>=? AND msgCreateTime<?"
 		args := []any{opt.Start.Unix(), opt.End.Unix()}
 		if cur != nil {
@@ -373,8 +440,12 @@ func scanDatabase(ctx context.Context, db *sql.DB, root, path string, opt Option
 			query += " AND msgCreateTime<=?"
 			args = append(args, (*best)[0].Time.Unix())
 		}
-		query += " ORDER BY msgCreateTime ASC,mesLocalID ASC LIMIT ?"
-		args = append(args, capacity)
+		query += " ORDER BY msgCreateTime ASC,mesLocalID ASC"
+		// Sender filtering needs to examine past excluded rows before filling a page.
+		if len(excludedSenders) == 0 {
+			query += " LIMIT ?"
+			args = append(args, capacity)
+		}
 		rows, err := tx.QueryContext(ctx, query, args...)
 		if err != nil {
 			return err
@@ -388,6 +459,9 @@ func scanDatabase(ctx context.Context, db *sql.DB, root, path string, opt Option
 			}
 			person, resolved := users[tableHash]
 			message := raw.Wrap(person.user)
+			if excludedSenders[message.Sender] {
+				continue
+			}
 			message.Time = message.Time.In(Beijing)
 			message.TalkerName = person.name
 			if person.user != "" && message.Sender == person.user {

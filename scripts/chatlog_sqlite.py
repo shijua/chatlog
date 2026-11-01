@@ -192,9 +192,17 @@ def sync_tables(args, run_at=None):
         previous = {}
     if previous and previous.get("work_dir") != str(root):
         raise ValueError("work directory changed; choose a separate output directory")
+    excluded_hashes = previous.get("excluded_table_hashes", [])
+    if not isinstance(excluded_hashes, list) or any(
+        not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{32}", value)
+        for value in excluded_hashes
+    ):
+        raise ValueError("invalid excluded_table_hashes list")
+    excluded_hashes = {value.lower() for value in excluded_hashes}
     if previous:
         flatten_exports(dest, previous)
-    old = {e["id"]: e for e in previous.get("missing_tables", []) + previous.get("tables", [])}
+    old = {e["id"]: e for e in previous.get("missing_tables", []) + previous.get("tables", [])
+           if e.get("table_hash") not in excluded_hashes}
     users, warnings = identities(root)
     # Keep resolved identities even after optional legacy exports are removed.
     for entry in old.values():
@@ -213,12 +221,15 @@ def sync_tables(args, run_at=None):
                 users.setdefault(hashlib.md5(user.encode()).hexdigest(), {
                     "talker": user, "nickname": entry.get("nickName", entry.get("nickname", "")), "remark": ""})
     summary = {"started_at": (run_at or datetime.now(timezone.utc)).isoformat(),
-               "successful_tables": 0, "failed_tables": 0, "rewritten_tables": 0, "skipped_tables": 0}
+               "successful_tables": 0, "failed_tables": 0, "rewritten_tables": 0, "skipped_tables": 0,
+               "excluded_tables": 0}
     index = {"schema_version": 2, "source_type": "sqlite_tables", "work_dir": str(root),
              "status": "in_progress", "started_at": previous.get("started_at", summary["started_at"]),
              "tables": [], "database_failures": [], "identity_warnings": warnings, "last_run": summary,
+             "excluded_table_hashes": sorted(excluded_hashes),
              "legacy_api_index": "api-index.json" if (dest / "api-index.json").exists() else None}
     seen = set()
+    excluded_sources = set()
     failed_databases = set()
     for source in paths:
         relative = source.relative_to(root).as_posix()
@@ -230,6 +241,9 @@ def sync_tables(args, run_at=None):
                 for table in tables:
                     table_hash = TABLE.fullmatch(table).group(1).lower()
                     identity = relative + ":" + table
+                    if table_hash in excluded_hashes:
+                        excluded_sources.add(identity)
+                        continue
                     seen.add(identity)
                     filename = hashlib.sha256(relative.encode()).hexdigest()[:16] + "_" + table_hash + ".json"
                     entry = dict(old.get(identity, {}))
@@ -277,12 +291,15 @@ def sync_tables(args, run_at=None):
             summary["failed_tables"] += 1
     index["missing_tables"] = [entry for key, entry in old.items() if key not in seen and entry["database"] not in failed_databases]
     index["table_count"] = len(seen)
+    index["excluded_table_count"] = len(excluded_sources)
+    index["discovered_table_count"] = len(seen) + len(excluded_sources)
     index["unique_table_hashes"] = len({e["table_hash"] for e in index["tables"]})
     summary["completed_at"] = datetime.now(timezone.utc).isoformat()
     index["status"] = "completed_with_failures" if summary["failed_tables"] or index["database_failures"] else "completed"
     index["completed_at"] = summary["completed_at"]
     checkpoint(dest, index)
     summary.update(total_messages=index["total_messages"], table_count=index["table_count"],
+                   excluded_tables=index["excluded_table_count"],
                    unresolved_tables=len(index["unresolved_tables"]), database_failures=len(index["database_failures"]))
     checkpoint(dest, index)
     return summary

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -199,5 +200,145 @@ func TestCancellationAndReadOnly(t *testing.T) {
 	defer db.Close()
 	if _, err := db.Exec("CREATE TABLE forbidden (id INTEGER)"); err == nil {
 		t.Fatal("read-only connection allowed writes")
+	}
+}
+
+func TestExcludeTalkerAcrossShardsAndUnknownIdentity(t *testing.T) {
+	root, opt := fixture(t)
+	opt.ExcludeTalkers = []string{"wxid_private"}
+	page, err := Query(context.Background(), root, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.TablesExcluded != 2 || page.TablesScanned != 2 {
+		t.Fatal("conversation exclusion did not cover both shards")
+	}
+	for _, item := range page.Items {
+		if item.TableHash == fmt.Sprintf("%x", md5.Sum([]byte("wxid_private"))) {
+			t.Fatal("excluded conversation returned")
+		}
+	}
+	opt.ExcludeTalkers = []string{"unknown-person"}
+	page, err = Query(context.Background(), root, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 5 || page.UnresolvedItems != 0 || page.TablesExcluded != 1 {
+		t.Fatal("unmapped table was not excluded by exact ID hash")
+	}
+}
+
+func TestExcludeSenderKeepsOtherMembersAndSelfMessages(t *testing.T) {
+	root, opt := fixture(t)
+	db := makeDB(t, filepath.Join(root, "Message/msg_0.db"))
+	exec(t, db, "INSERT INTO "+quote(table("wxid_private"))+" VALUES (?,?,?,?,?,?)", 6, 100, opt.Start.Unix()+2, "my reply", 1, 0)
+	opt.ExcludeSenders = []string{"wxid_private", "wxid_sender"}
+	page, err := Query(context.Background(), root, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("got %d messages, want unknown + self reply", len(page.Items))
+	}
+	self := false
+	for _, item := range page.Items {
+		if item.Sender == "wxid_private" || item.Sender == "wxid_sender" {
+			t.Fatal("excluded sender returned")
+		}
+		if item.IsSelf && item.Content == "my reply" {
+			self = true
+		}
+	}
+	if !self {
+		t.Fatal("sender exclusion incorrectly removed my reply")
+	}
+}
+
+func TestSenderExclusionRunsBeforePageLimit(t *testing.T) {
+	root, opt := fixture(t)
+	db := makeDB(t, filepath.Join(root, "Message/msg_1.db"))
+	for n := 2; n <= 32; n++ {
+		exec(t, db, "INSERT INTO "+quote(table("group@chatroom"))+" VALUES (?,?,?,?,?,?)", n, n, opt.Start.Unix()+2, "wxid_sender:\nfiltered", 1, 1)
+	}
+	exec(t, db, "INSERT INTO "+quote(table("group@chatroom"))+" VALUES (?,?,?,?,?,?)", 33, 33, opt.Start.Unix()+3, "wxid_other:\nkeep me", 1, 1)
+	opt.Start = opt.Start.Add(2 * time.Second)
+	opt.ExcludeSenders = []string{"wxid_sender"}
+	opt.Limit = 1
+	page, err := Query(context.Background(), root, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Sender != "wxid_other" || page.HasMore {
+		t.Fatal("excluded rows consumed the page limit")
+	}
+}
+
+func TestExclusionsBindCursorAndCanonicalizeOrder(t *testing.T) {
+	root, opt := fixture(t)
+	opt.Limit = 1
+	opt.ExcludeTalkers = []string{" absent_b ", "absent_a", "absent_a"}
+	first, err := Query(context.Background(), root, opt)
+	if err != nil || !first.HasMore {
+		t.Fatal("expected a page cursor")
+	}
+	opt.Cursor = first.NextCursor
+	opt.ExcludeTalkers = []string{"absent_a", "absent_b"}
+	if _, err := Query(context.Background(), root, opt); err != nil {
+		t.Fatal("equivalent filter set changed cursor binding", err)
+	}
+	opt.ExcludeTalkers = nil
+	if _, err := Query(context.Background(), root, opt); err == nil {
+		t.Fatal("filter removed while reusing cursor")
+	}
+	opt.ExcludeTalkers = []string{"absent_a", "absent_b"}
+	opt.ExcludeSenders = []string{"wxid_sender"}
+	if _, err := Query(context.Background(), root, opt); err == nil {
+		t.Fatal("sender filter changed while reusing cursor")
+	}
+}
+
+func TestExcludedPaginationMatchesWholeFilteredResult(t *testing.T) {
+	root, opt := fixture(t)
+	opt.ExcludeTalkers = []string{"unknown-person"}
+	opt.ExcludeSenders = []string{"wxid_sender"}
+	all, err := Query(context.Background(), root, opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt.Limit = 1
+	var got []*Item
+	for n := 0; n < 10; n++ {
+		page, err := Query(context.Background(), root, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, page.Items...)
+		if !page.HasMore {
+			break
+		}
+		opt.Cursor = page.NextCursor
+	}
+	if len(got) != len(all.Items) {
+		t.Fatal("filtered pagination lost messages")
+	}
+	for n, item := range got {
+		if item.Source != all.Items[n].Source || item.LocalID != all.Items[n].LocalID {
+			t.Fatal("filtered pagination changed order")
+		}
+	}
+}
+
+func TestInvalidExclusions(t *testing.T) {
+	_, opt := fixture(t)
+	opt.ExcludeTalkers = []string{strings.Repeat("x", 257)}
+	if Validate(opt) == nil {
+		t.Fatal("oversized identifier accepted")
+	}
+	opt.ExcludeTalkers = nil
+	for n := 0; n < 101; n++ {
+		opt.ExcludeSenders = append(opt.ExcludeSenders, strconv.Itoa(n))
+	}
+	if Validate(opt) == nil {
+		t.Fatal("too many excluded identifiers accepted")
 	}
 }

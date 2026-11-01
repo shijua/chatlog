@@ -13,7 +13,7 @@ import (
 
 func TestTimelineHTTPValidatesBeforeQuery(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, raw := range []string{"", "?start=bad&end=2026-11-02", "?start=2026-11-02&end=2026-11-01", "?start=2026-11-01&end=2026-11-02&limit=0", "?start=2026-11-01&end=2026-11-02&cursor=garbage", "?start=2026-11-01&end=2026-11-02&format=csv"} {
+	for _, raw := range []string{"", "?start=bad&end=2026-11-02", "?start=2026-11-02&end=2026-11-01", "?start=2026-11-01&end=2026-11-02&limit=0", "?start=2026-11-01&end=2026-11-02&cursor=garbage", "?start=2026-11-01&end=2026-11-02&format=csv", "?start=2026-11-01&end=2026-11-02&exclude_talker=" + strings.Repeat("x", 257), "?start=2026-11-01&end=2026-11-02&exclude_sender=a&exclude_sender=b"} {
 		t.Run(raw, func(t *testing.T) {
 			r := gin.New()
 			r.GET("/api/v1/timeline", timelineHandler(func(context.Context, timeline.Options) (*timeline.Page, error) {
@@ -49,5 +49,20 @@ func TestTimelineHTTPNoTalkerRequiredAndErrorsFailClosed(t *testing.T) {
 		if tc.status == 500 && strings.Contains(w.Body.String(), tc.err.Error()) {
 			t.Fatal("backend detail exposed")
 		}
+	}
+}
+
+func TestTimelineHTTPPassesBothExclusionLists(t *testing.T) {
+	r := gin.New()
+	r.GET("/api/v1/timeline", timelineHandler(func(_ context.Context, opt timeline.Options) (*timeline.Page, error) {
+		if len(opt.ExcludeTalkers) != 2 || opt.ExcludeTalkers[0] != "wxid_a" || opt.ExcludeTalkers[1] != "group@chatroom" || len(opt.ExcludeSenders) != 1 || opt.ExcludeSenders[0] != "wxid_b" {
+			t.Fatal("exclusions not passed to query")
+		}
+		return &timeline.Page{Items: []*timeline.Item{}}, nil
+	}))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/timeline?start=2026-11-01&end=2026-11-02&exclude_talker=wxid_a,group@chatroom&exclude_sender=wxid_b", nil))
+	if w.Code != 200 {
+		t.Fatalf("status %d", w.Code)
 	}
 }

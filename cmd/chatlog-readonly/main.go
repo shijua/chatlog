@@ -14,7 +14,7 @@ import (
 const upstream = "http://127.0.0.1:5030"
 
 var allowedQueries = map[string]map[string]bool{
-	"/api/v1/timeline": {"start": true, "end": true, "limit": true, "cursor": true, "format": true},
+	"/api/v1/timeline": {"start": true, "end": true, "limit": true, "cursor": true, "format": true, "exclude_talker": true, "exclude_sender": true},
 	"/api/v1/session":  {"keyword": true, "limit": true, "offset": true, "format": true},
 	"/api/v1/chatlog":  {"talker": true, "time": true, "sender": true, "keyword": true, "limit": true, "offset": true, "format": true},
 	"/api/v1/contact":  {"keyword": true, "limit": true, "offset": true, "format": true},

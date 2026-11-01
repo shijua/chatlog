@@ -125,6 +125,42 @@ class DatabaseSyncTests(unittest.TestCase):
         self.assertTrue((self.dest / entry["file"]).exists())
         self.assertEqual(json.loads((self.dest / "index.json").read_text()), index)
 
+    def test_local_exclusion_survives_sync_and_full_without_recreating_file(self):
+        _, index = self.run_sync()
+        entry = next(e for e in index["tables"] if e["talker"] == self.first)
+        path = self.dest / entry["file"]
+        path.unlink()
+        index["excluded_table_hashes"] = [entry["table_hash"]]
+        export.atomic_json(self.dest / "index.json", index)
+        for full in (False, True):
+            self.args.full = full
+            summary, result = self.run_sync()
+            self.assertEqual(summary["successful_tables"], 1)
+            self.assertEqual(summary["excluded_tables"], 1)
+            self.assertEqual(result["discovered_table_count"], 2)
+            self.assertEqual(result["table_count"], 1)
+            self.assertFalse(path.exists())
+            self.assertFalse(any(e["table_hash"] == entry["table_hash"] for e in result["tables"] + result["missing_tables"]))
+            self.assertEqual(result["excluded_table_hashes"], [entry["table_hash"]])
+        db = local.read_only(self.db_path)
+        try:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM "' + self.first_table + '"').fetchone()[0], 1)
+        finally:
+            db.close()
+        result["excluded_table_hashes"] = []
+        export.atomic_json(self.dest / "index.json", result)
+        _, restored = self.run_sync()
+        self.assertTrue(path.exists())
+        self.assertEqual(restored["table_count"], 2)
+
+    def test_invalid_exclusion_list_fails_without_changes(self):
+        _, index = self.run_sync()
+        index["excluded_table_hashes"] = ["not-a-table-hash"]
+        export.atomic_json(self.dest / "index.json", index)
+        with self.assertRaisesRegex(ValueError, "excluded_table_hashes"):
+            self.run_sync()
+        self.assertEqual(json.loads((self.dest / "index.json").read_text()), index)
+
     def test_no_change_skips_all_snapshots(self):
         self.run_sync()
         with patch.object(local, "snapshot", side_effect=AssertionError("unexpected reread")):

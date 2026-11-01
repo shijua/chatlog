@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sjzar/chatlog/internal/wechatdb/timeline"
@@ -18,6 +19,12 @@ func (s *Service) handleTimeline(c *gin.Context) {
 
 func timelineHandler(query timelineQuery) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		for _, name := range []string{"exclude_talker", "exclude_sender"} {
+			if len(c.Request.URL.Query()[name]) > 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "use one comma-separated value per exclusion parameter"})
+				return
+			}
+		}
 		if format := c.Query("format"); format != "" && format != "json" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "timeline supports JSON only"})
 			return
@@ -35,9 +42,10 @@ func timelineHandler(query timelineQuery) gin.HandlerFunc {
 				return
 			}
 		}
-		options := timeline.Options{Start: start, End: end, Limit: limit, Cursor: c.Query("cursor")}
+		options := timeline.Options{Start: start, End: end, Limit: limit, Cursor: c.Query("cursor"),
+			ExcludeTalkers: strings.Split(c.Query("exclude_talker"), ","), ExcludeSenders: strings.Split(c.Query("exclude_sender"), ",")}
 		if err := timeline.Validate(options); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pagination or cursor time range mismatch"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid pagination, exclusions, or cursor range/filter mismatch"})
 			return
 		}
 		page, err := query(c.Request.Context(), options)

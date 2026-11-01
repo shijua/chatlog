@@ -46,7 +46,13 @@ python3 scripts/chatlog_export.py --source api --full
 
 This compatibility mode uses `127.0.0.1:5030`, updates the original session-based files and (after migration) `api-index.json`, and refreshes `chatlog-session.json`. It discovers sessions through `/session`, so it **does not cover all message tables**. It queries every known session from its previous successful run boundary minus 24 hours through the current run's fixed start, and new sessions fetch full history. It paginates until an empty page. Overlap matching preserves duplicate occurrence counts; failures preserve the previous file/checkpoint. Because API 3.x responses lack a reliable unique message ID, API mode preserves old records and may retain additional versions of edited messages. Very old imported history can fall outside the overlap window.
 
-Use `--output /absolute/path` to select a different destination. Run tests:
+Use `--output /absolute/path` to select a different destination.
+
+## Local export exclusions
+
+To keep a deliberately removed local conversation export from being recreated, add its 32-character `table_hash` to `index.json` → `excluded_table_hashes`. Default database mode (including `--full`) skips that hash across all database shards and retains the exclusion list. The index reports included `table_count`, `excluded_table_count`, and `discovered_table_count`. Remove the old JSON and index entry when applying the exclusion; synchronization does not delete files on its own. This only affects local exports, not WeChat databases or timeline API results. Removing a hash from the list re-enables export on the next run.
+
+## Tests
 
 ```sh
 python3 -m unittest discover -s scripts -p 'test_chatlog*.py'
