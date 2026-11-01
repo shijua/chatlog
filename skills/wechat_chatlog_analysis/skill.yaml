@@ -1,0 +1,5 @@
+name: "wechat_chatlog_analysis"
+title: "WeChat Chatlog Analysis"
+description: "Turn a user's own exported WeChat chat records into a chronological personal timeline plus a relationship analysis, with identity resolved by account id and every event verified against original messages."
+category: "Work and knowledge"
+include_in_prompt: false
