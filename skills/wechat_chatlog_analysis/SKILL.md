@@ -12,6 +12,11 @@
 
 - Treat a private chat name, a group nickname and a system message name as three different forms of the same person only after the account id proves the link.
 
+## Standing exclusion rule (user-fixed, 2026-11-01)
+
+- In group chats, that person's messages as sender are still left out of the narrative (use `exclude_sender` with the same account id), unless the user later explicitly says to remove only the private chat.
+- Never re-add the excluded private chat by topic selection, and never let a later merge or monthly update bring it back.
+
 ## Build one unified index
 
 - Prefer the whole account timeline endpoint when it exists, because it returns every message table in chronological order in one sweep, with no talker parameter and no session list in between.
@@ -81,6 +86,13 @@
 - Map chat evidence to inferred real life plans where useful, label each inference as an inference, and show which messages support it.
 
 - Put the relationship analysis at the very end as its own part, written naturally as character arcs over time, not as a list of counts.
+
+## Write the relationship analysis (Part 2)
+
+- Part 2 is a required deliverable, not optional: after the chronological timeline, write one section per person, in the same natural narrative style as the timeline, covering how that relationship started, how it changed over time, and where it stands.
+- Each person's section keeps the factual narrative first, then adds one explicitly labelled inference paragraph: that person's place in the user's life, the basis for closeness and trust, why the relationship changed, and what the change means. Where evidence is insufficient, write that it cannot be read from the records and do not attribute a cause.
+- Use group-chat evidence as well as private-chat evidence in each person's arc, and note where private and group behaviour are consistent or differ. Do not base a relationship judgement on a word count alone.
+- Keep Part 2 last: nothing is appended after it, and a later timeline update only revises the arcs that actually changed.
 
 - Integrate later additions seamlessly into the existing months and never leave labels such as supplement, batch or draft in the delivered file.
 
