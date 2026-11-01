@@ -12,11 +12,6 @@
 
 - Treat a private chat name, a group nickname and a system message name as three different forms of the same person only after the account id proves the link.
 
-## Standing exclusion rule (user-fixed, 2026-11-01)
-
-- In group chats, that person's messages as sender are still left out of the narrative (use `exclude_sender` with the same account id), unless the user later explicitly says to remove only the private chat.
-- Never re-add the excluded private chat by topic selection, and never let a later merge or monthly update bring it back.
-
 ## Build one unified index
 
 - Prefer the whole account timeline endpoint when it exists, because it returns every message table in chronological order in one sweep, with no talker parameter and no session list in between.
