@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -30,7 +31,12 @@ func readOnlyHandler(client *http.Client) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		isImage := strings.HasPrefix(r.URL.Path, "/image/")
 		allowed, ok := allowedQueries[r.URL.Path]
+		if isImage {
+			allowed = map[string]bool{}
+			ok = validImageKey(strings.TrimPrefix(r.URL.Path, "/image/"))
+		}
 		if !ok || r.URL.EscapedPath() != r.URL.Path || r.URL.IsAbs() || r.URL.Host != "" {
 			http.NotFound(w, r)
 			return
@@ -49,6 +55,10 @@ func readOnlyHandler(client *http.Client) http.Handler {
 				http.Error(w, "query parameter not allowed", http.StatusBadRequest)
 				return
 			}
+		}
+		if isImage {
+			serveImage(w, r, client)
+			return
 		}
 		if format := query.Get("format"); format != "" && format != "json" {
 			http.Error(w, "only JSON is supported", http.StatusBadRequest)
