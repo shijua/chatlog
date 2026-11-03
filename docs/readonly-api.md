@@ -27,7 +27,7 @@ These GET endpoints return file bytes directly and accept no query parameters. `
 
 | Endpoint | Response | Size limit |
 | --- | --- | --- |
-| `/image/v3_…` (see below) | JPEG, PNG, GIF, WebP or BMP | 32 MiB |
+| `/image/<md5>` or `/image/v3_…` (see below) | JPEG, PNG, GIF, WebP or BMP | 32 MiB |
 | `/file/<md5>` | Download attachment (`application/octet-stream`) | 64 MiB |
 | `/voice/<md5>` | Original SILK, AMR, MP3, WAV or Ogg audio | 32 MiB |
 | `/video/<md5>` | MP4 or WebM | 128 MiB |
@@ -46,7 +46,7 @@ For images, voice and video, prefer these routes when a message MD5 is empty or 
 
 The gateway derives a fixed Image, Audio or Video path from the message fields. Table hashes must be hexadecimal; IDs must be canonical positive decimals (`localId` and image/video timestamps: uint32; voice server ID: uint64). The same media size and format limits apply.
 
-Only `/image/v3_<tableHash>_<localId>_<timestamp>` tries HD, original, thumbnail, then thumbnail preview, advancing only on 404. Successful responses include `X-Chatlog-Media-Variant: hd`, `original`, or `thumbnail`. `/image/<md5>` is rejected with 404; only the image message-key format is exposed.
+Both image routes support thumbnail fallback for recognized Mac 3.x image paths: HD, original, thumbnail, then thumbnail preview, advancing only on 404. Successful responses include `X-Chatlog-Media-Variant: hd`, `original`, `thumbnail`, or `indexed` (an unclassified indexed path). `/image/<md5>` first resolves the media index; if no path is indexed, it returns 404 and the agent should use the message-key route.
 
 Missing images return 404 after all candidates fail; missing audio/video originals also return 404. Video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. Neither route accepts arbitrary file paths.
 

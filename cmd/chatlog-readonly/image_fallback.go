@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,10 +40,34 @@ func serveImageWithFallback(w http.ResponseWriter, r *http.Request, client *http
 		return client.Do(req)
 	}
 	key := strings.TrimPrefix(r.URL.Path, "/image/")
-	mediaPath, ok := darwinImagePath(key)
-	if !ok {
-		http.NotFound(w, r)
-		return
+	mediaPath, direct := darwinImagePath(key)
+	if !direct {
+		if !validImageKey(key) {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := fetch(upstream + r.URL.Path + "?info=1")
+		if err != nil {
+			http.Error(w, "backend unavailable", 502)
+			return
+		}
+		defer info.Body.Close()
+		if info.StatusCode != 200 {
+			status := 502
+			if info.StatusCode == 404 {
+				status = 404
+			}
+			http.Error(w, "image lookup failed", status)
+			return
+		}
+		var media struct {
+			Path string `json:"path"`
+		}
+		if json.NewDecoder(io.LimitReader(info.Body, 64<<10)).Decode(&media) != nil || !validImagePath(media.Path) {
+			http.Error(w, "image unavailable", 502)
+			return
+		}
+		mediaPath = media.Path
 	}
 	for _, candidate := range imageCandidates(mediaPath) {
 		if !validImagePath(candidate.path) {

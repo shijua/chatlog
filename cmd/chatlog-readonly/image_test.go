@@ -10,7 +10,7 @@ const testImageKey = "0123456789abcdef0123456789abcdef"
 
 func TestImageRejectsUnsafeRequests(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { t.Fatal("unsafe request forwarded"); return nil, nil })}
-	for _, p := range []string{"/image/" + testImageKey, "/image/", "/image/../secret", "/image/" + testImageKey + "/file", "/image/" + testImageKey + "," + testImageKey, "/image/" + testImageKey + "?info=1", "/image/" + testImageKey + "?format=json", "/image/%30" + testImageKey[1:]} {
+	for _, p := range []string{"/image/", "/image/../secret", "/image/" + testImageKey + "/file", "/image/" + testImageKey + "," + testImageKey, "/image/" + testImageKey + "?info=1", "/image/" + testImageKey + "?format=json", "/image/%30" + testImageKey[1:]} {
 		w := httptest.NewRecorder()
 		readOnlyHandler(client).ServeHTTP(w, httptest.NewRequest("GET", p, nil))
 		if w.Code < 400 {

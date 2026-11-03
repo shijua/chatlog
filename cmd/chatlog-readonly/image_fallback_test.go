@@ -53,12 +53,48 @@ func TestImageFallbackOrder(t *testing.T) {
 	}
 }
 
-func TestMD5ImageIsRejectedBeforeBackend(t *testing.T) {
-	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { t.Fatal("MD5 image request forwarded"); return nil, nil })}
-	w := httptest.NewRecorder()
-	readOnlyHandler(client).ServeHTTP(w, httptest.NewRequest("GET", "/image/"+testImageKey, nil))
-	if w.Code != 404 {
-		t.Fatalf("status %d", w.Code)
+func TestMD5ImageFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, metadata            string
+		lookupStatus, want, calls int
+		variant                   string
+	}{
+		{"thumbnail", `{"path":"Message/MessageTemp/a/Image/picture.pic.jpg"}`, 200, 200, 4, "thumbnail"},
+		{"missing_index", "", 404, 404, 1, ""},
+		{"lookup_failure", "", 500, 502, 1, ""},
+		{"unsafe_path", `{"path":"Message/MessageTemp/../secret"}`, 200, 502, 1, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client := backendClient()
+			client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.URL.Host != "127.0.0.1:5030" || r.Method != "GET" {
+					t.Fatal("unsafe request")
+				}
+				if calls == 1 {
+					if r.URL.Path != "/image/"+testImageKey || r.URL.RawQuery != "info=1" {
+						t.Fatal("wrong lookup")
+					}
+					return &http.Response{StatusCode: tc.lookupStatus, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(tc.metadata))}, nil
+				}
+				paths := []string{".pic_hd.jpg", ".pic.jpg", ".pic_thumb.jpg"}
+				if calls > 4 || r.URL.Path != "/data/Message/MessageTemp/a/Image/picture"+paths[calls-2] {
+					t.Fatal("wrong fallback path")
+				}
+				status, body := 404, ""
+				if calls == 4 {
+					status = 200
+					body = "\x89PNG\r\n\x1a\n"
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})
+			w := httptest.NewRecorder()
+			readOnlyHandler(client).ServeHTTP(w, httptest.NewRequest("GET", "/image/"+testImageKey, nil))
+			if w.Code != tc.want || calls != tc.calls || w.Header().Get("X-Chatlog-Media-Variant") != tc.variant {
+				t.Fatalf("status %d calls %d", w.Code, calls)
+			}
+		})
 	}
 }
 
