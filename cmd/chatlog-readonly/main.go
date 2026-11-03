@@ -46,6 +46,9 @@ func readOnlyHandler(client *http.Client) http.Handler {
 			if mediaKind == "voice" && !ok {
 				_, ok = darwinVoicePath(key)
 			}
+			if mediaKind == "image" {
+				_, ok = darwinImagePath(key)
+			}
 			if mediaKind == "video" && !ok {
 				_, ok = darwinVideoPath(key)
 			}

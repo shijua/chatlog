@@ -52,6 +52,10 @@ func validMediaPath(p, kind string) bool {
 
 // Resolve a media hash or a strictly validated message key; never expose arbitrary paths.
 func serveIndexedMedia(w http.ResponseWriter, r *http.Request, client *http.Client, kind string) {
+	if kind == "image" {
+		serveImageWithFallback(w, r, client)
+		return
+	}
 	fetch := func(target string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, target, nil)
 		if err != nil {

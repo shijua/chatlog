@@ -27,7 +27,7 @@ These GET endpoints return file bytes directly and accept no query parameters. `
 
 | Endpoint | Response | Size limit |
 | --- | --- | --- |
-| `/image/<md5>` | JPEG, PNG, GIF, WebP or BMP | 32 MiB |
+| `/image/v3_…` (see below) | JPEG, PNG, GIF, WebP or BMP | 32 MiB |
 | `/file/<md5>` | Download attachment (`application/octet-stream`) | 64 MiB |
 | `/voice/<md5>` | Original SILK, AMR, MP3, WAV or Ogg audio | 32 MiB |
 | `/video/<md5>` | MP4 or WebM | 128 MiB |
@@ -36,16 +36,19 @@ Image, audio and video content signatures are checked. Attachments use `Content-
 
 ### Mac WeChat 3.x message keys
 
-For voice and video, prefer these routes when a message MD5 is empty or absent from the media index:
+For images, voice and video, prefer these routes when a message MD5 is empty or absent from the media index:
 
 | Endpoint | Fields from a timeline item |
 | --- | --- |
+| `/image/v3_<tableHash>_<localId>_<timestamp>` | `type=3`; convert `time` to Unix **seconds** |
 | `/voice/v3_<tableHash>_<localId>_<serverId>` | `type=34`; keep `serverId` as a decimal string to avoid JavaScript rounding |
 | `/video/v3_<tableHash>_<localId>_<timestamp>` | `type=43`; convert `time` to Unix **seconds**, not milliseconds |
 
-The gateway derives a fixed Audio or Video path from the message fields. Table hashes must be hexadecimal; IDs must be canonical positive decimals (`localId` and video timestamp: uint32; voice server ID: uint64). The same media size and format limits apply.
+The gateway derives a fixed Image, Audio or Video path from the message fields. Table hashes must be hexadecimal; IDs must be canonical positive decimals (`localId` and image/video timestamps: uint32; voice server ID: uint64). The same media size and format limits apply.
 
-Missing originals return 404; video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. Neither route accepts arbitrary file paths.
+Only `/image/v3_<tableHash>_<localId>_<timestamp>` tries HD, original, thumbnail, then thumbnail preview, advancing only on 404. Successful responses include `X-Chatlog-Media-Variant: hd`, `original`, or `thumbnail`. `/image/<md5>` is rejected with 404; only the image message-key format is exposed.
+
+Missing images return 404 after all candidates fail; missing audio/video originals also return 404. Video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. Neither route accepts arbitrary file paths.
 
 ## Access restrictions
 
