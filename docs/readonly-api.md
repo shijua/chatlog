@@ -1,18 +1,57 @@
 # Remote read-only API
 
-Keep chatlog bound to `127.0.0.1:5030`. Expose the separate gateway on the Mac's assigned Tailscale IPv4 address:
+Keep the chatlog backend on `127.0.0.1:5030`; expose only the gateway on the Mac's Tailscale IPv4 address:
 
 ```sh
 GOTOOLCHAIN=go1.24.0 go build -o bin/chatlog-readonly ./cmd/chatlog-readonly
 ./bin/chatlog-readonly --addr <Mac-Tailscale-IP>:5030 --allow-peer <VM-Tailscale-IP>
 ```
 
-The gateway only forwards GET requests for `/api/v1/session`, `/api/v1/chatlog`, `/api/v1/contact`, `/api/v1/chatroom`, and `/api/v1/timeline` to the fixed local backend. Contacts and chatrooms accept `keyword`, `limit`, `offset`, and `format`. Timeline accepts `start`, `end`, `limit`, `cursor`, `format`, `exclude_talker`, and `exclude_sender`; see [the timeline API](timeline-api.md). It accepts the existing query parameters for those routes and returns JSON. `/api/v1/search` and `/api/v1/diary` are not implemented in this version; message search uses the chatlog endpoint's `keyword` parameter. The gateway also supports `GET /image/<md5>` (one 32-character hexadecimal hash, no query parameters). It resolves the hash through the backend media index and returns image bytes directly, with no redirect. Only JPEG, PNG, GIF, WebP and BMP signatures are accepted, up to 32 MiB. Missing local media or an unavailable media index cannot be recovered by this endpoint. It does not accept local file paths, comma-separated keys, or direct `/data/` access.
+## JSON endpoints
 
-All other paths and methods, request bodies, duplicate or unknown query parameters, and encoded paths are rejected. Client headers are not forwarded, and backend redirects are not followed. It has no message-sending or file-writing endpoint.
+All endpoints use GET and return JSON. `format=json` is optional; other formats are rejected.
 
-Remote binding requires `--allow-peer` with exactly one Tailscale IPv4 source. Connections from all other addresses receive 403 before reaching chatlog. The check uses the actual connection source and ignores forwarded headers.
+| Endpoint | Accepted query parameters |
+| --- | --- |
+| `/api/v1/session` | `keyword`, `limit`, `offset`, `format` |
+| `/api/v1/contact` | `keyword`, `limit`, `offset`, `format` |
+| `/api/v1/chatroom` | `keyword`, `limit`, `offset`, `format` |
+| `/api/v1/chatlog` | `talker`, `time`, `sender`, `keyword`, `limit`, `offset`, `format` |
+| `/api/v1/timeline` | `start`, `end`, `limit`, `cursor`, `exclude_talker`, `exclude_sender`, `format` |
 
-The default listener is `127.0.0.1:5031` for local verification. Wildcard and LAN listen addresses are rejected. The gateway does not configure Tailscale: use a tailnet policy that only permits the intended VM to reach the gateway's TCP port, and check for broader existing allow rules. Neither process provides application authentication. An allowed reader can retrieve all API-accessible conversations and messages.
+Use chatlog's `keyword` for message search. See [timeline parameters and pagination](timeline-api.md) for account-wide time ranges.
 
-This restriction applies to the gateway. Never expose the original chatlog listener remotely, because it also provides media, file and MCP routes. It does not restrict unrelated remote access such as SSH or file sharing.
+## Media endpoints
+
+These GET endpoints return file bytes directly and accept no query parameters. `<md5>` is one 32-character hexadecimal media hash; it must resolve in the local media index.
+
+| Endpoint | Response | Size limit |
+| --- | --- | --- |
+| `/image/<md5>` | JPEG, PNG, GIF, WebP or BMP | 32 MiB |
+| `/file/<md5>` | Download attachment (`application/octet-stream`) | 64 MiB |
+| `/voice/<md5>` | Original SILK, AMR, MP3, WAV or Ogg audio | 32 MiB |
+| `/video/<md5>` | MP4 or WebM | 128 MiB |
+
+Image, audio and video content signatures are checked. Attachments use `Content-Disposition: attachment` and a sandbox CSP. No transcription, automatic audio conversion, CDN download or Range forwarding is performed.
+
+### Mac WeChat 3.x message keys
+
+For voice and video, prefer these routes when a message MD5 is empty or absent from the media index:
+
+| Endpoint | Fields from a timeline item |
+| --- | --- |
+| `/voice/v3_<tableHash>_<localId>_<serverId>` | `type=34`; keep `serverId` as a decimal string to avoid JavaScript rounding |
+| `/video/v3_<tableHash>_<localId>_<timestamp>` | `type=43`; convert `time` to Unix **seconds**, not milliseconds |
+
+The gateway derives a fixed Audio or Video path from the message fields. Table hashes must be hexadecimal; IDs must be canonical positive decimals (`localId` and video timestamp: uint32; voice server ID: uint64). The same media size and format limits apply.
+
+Missing originals return 404; video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. Neither route accepts arbitrary file paths.
+
+## Access restrictions
+
+- Only GET from the configured `--allow-peer` IP is accepted; other sources receive 403. Forwarded IP headers are ignored.
+- Unknown routes, encoded paths, request bodies, and duplicate or unknown query parameters are rejected. Client headers are not forwarded and backend redirects are not followed.
+- Direct `/data/`, MCP, message sending and file writing are not exposed. Search, diary and Moments/SNS APIs are not implemented.
+- Responses use `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`.
+
+The default gateway listener is `127.0.0.1:5031` for local checks. Only loopback and Tailscale IPv4 listeners are allowed. Configure tailnet access separately; the gateway does not change Tailscale policy or provide application authentication. The allowed VM can read all API-accessible messages and media. Keep the original backend private; these restrictions apply only to the gateway.

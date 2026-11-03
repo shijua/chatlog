@@ -31,11 +31,24 @@ func readOnlyHandler(client *http.Client) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		isImage := strings.HasPrefix(r.URL.Path, "/image/")
+		mediaKind := ""
+		for _, kind := range []string{"image", "file", "voice", "video"} {
+			if strings.HasPrefix(r.URL.Path, "/"+kind+"/") {
+				mediaKind = kind
+				break
+			}
+		}
 		allowed, ok := allowedQueries[r.URL.Path]
-		if isImage {
+		if mediaKind != "" {
 			allowed = map[string]bool{}
-			ok = validImageKey(strings.TrimPrefix(r.URL.Path, "/image/"))
+			key := strings.TrimPrefix(r.URL.Path, "/"+mediaKind+"/")
+			ok = validImageKey(key)
+			if mediaKind == "voice" && !ok {
+				_, ok = darwinVoicePath(key)
+			}
+			if mediaKind == "video" && !ok {
+				_, ok = darwinVideoPath(key)
+			}
 		}
 		if !ok || r.URL.EscapedPath() != r.URL.Path || r.URL.IsAbs() || r.URL.Host != "" {
 			http.NotFound(w, r)
@@ -56,8 +69,8 @@ func readOnlyHandler(client *http.Client) http.Handler {
 				return
 			}
 		}
-		if isImage {
-			serveImage(w, r, client)
+		if mediaKind != "" {
+			serveIndexedMedia(w, r, client, mediaKind)
 			return
 		}
 		if format := query.Get("format"); format != "" && format != "json" {
