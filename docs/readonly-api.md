@@ -48,7 +48,7 @@ The gateway derives a fixed Image, Audio or Video path from the message fields. 
 
 Both image routes support thumbnail fallback for recognized Mac 3.x image paths: HD, original, thumbnail, then thumbnail preview, advancing only on 404. Successful responses include `X-Chatlog-Media-Variant: hd`, `original`, `thumbnail`, or `indexed` (an unclassified indexed path). `/image/<md5>` first resolves the media index; if no path is indexed, it returns 404 and the agent should use the message-key route.
 
-Missing images return 404 after all candidates fail; missing audio/video originals also return 404. Video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. Neither route accepts arbitrary file paths.
+Missing images return 404 after all candidates fail; missing audio/video originals also return 404. Video thumbnails are not substituted. These rules cover the verified Mac 3.x naming schemes, not all historical files. Invalid media or oversized responses return 502. These routes do not accept arbitrary file paths.
 
 ## Access restrictions
 
